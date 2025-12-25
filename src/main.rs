@@ -10,6 +10,7 @@ use std::{collections::HashSet, ffi::{CStr, c_void}};
 
 use anyhow::{Error, Ok, Result, anyhow};
 use log::{debug, error, info, trace, warn};
+use thiserror::Error;
 use vulkanalia::{Entry, Instance, Version, loader::{LIBRARY, LibloadingLoader}, vk::{self, EntryV1_0, ExtDebugUtilsExtensionInstanceCommands, HasBuilder, InstanceV1_0}};
 use vulkanalia::window as vk_window;
 use winit::{dpi::LogicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::{Window, WindowAttributes}};
@@ -71,6 +72,7 @@ impl App {
         let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
         let mut data = AppData::default();
         let instance = create_instance(window, &entry, &mut data)?;
+        pick_physical_device(&instance, &mut data)?;
         Ok(Self { entry, instance, data })
     }
 
@@ -89,10 +91,41 @@ impl App {
     }
 }
 
+#[derive(Debug, Error)]
+#[error("Missing {0}.")]
+pub struct SuitabilityError(pub &'static str);
+
+/// Selects first suitable graphic card and write the physical device and related information to the AppData instance
+unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> Result<(), Error> {
+    Ok(())
+}
+
+/// Check that selected device is suitable for our purposes
+unsafe fn check_physical_device(
+    instance: &Instance, 
+    data: &mut AppData,
+    physical_device: vk::PhysicalDevice,
+) -> Result<(), Error> {
+    // Get basic device properties
+    let properties = instance.get_physical_device_properties(physical_device);
+    if properties.device_type != vk::PhysicalDeviceType::DISCRETE_GPU {
+        return Err(anyhow!(SuitabilityError("Only discrete GPUs are supported")));
+    }
+
+    // Get the support for optional features like texture compression, 64 bit floats, and multi-viewport rendering
+    let features = instance.get_physical_device_features(physical_device);
+    if features.geometry_shader != vk::TRUE {
+        return Err(anyhow!(SuitabilityError("Missing geometry shader support")));
+    }
+
+    Ok(())
+}
+
 /// The Vulkan handles and associated properties used by our Vulkan app
 #[derive(Clone, Debug, Default)]
 struct AppData {
     messenger: vk::DebugUtilsMessengerEXT,
+    physical_device: vk::PhysicalDevice,
 }
 
 /// Creates Vulkan instance for specified winit window and Vulkan entry point
