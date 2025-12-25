@@ -6,11 +6,11 @@
     clippy::unnecessary_wraps
 )]
 
-use std::collections::HashSet;
+use std::{collections::HashSet, ffi::{CStr, c_void}};
 
 use anyhow::{Error, Ok, Result, anyhow};
-use log::info;
-use vulkanalia::{Entry, Instance, Version, loader::{LIBRARY, LibloadingLoader}, vk::{self, EntryV1_0, HasBuilder, InstanceV1_0, layer}};
+use log::{debug, error, info, trace, warn};
+use vulkanalia::{Entry, Instance, Version, loader::{LIBRARY, LibloadingLoader}, vk::{self, EntryV1_0, ExtDebugUtilsExtensionInstanceCommands, HasBuilder, InstanceV1_0}};
 use vulkanalia::window as vk_window;
 use winit::{dpi::LogicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::{Window, WindowAttributes}};
 
@@ -61,6 +61,7 @@ fn main() -> Result<()> {
 struct App {
     entry: Entry,
     instance: Instance,
+    data: AppData,
 }
 
 impl App {
@@ -68,8 +69,9 @@ impl App {
     unsafe fn create(window: &Window) -> Result<Self, Error> {
         let loader = LibloadingLoader::new(LIBRARY)?;
         let entry = Entry::new(loader).map_err(|b| anyhow!("{}", b))?;
-        let instance = create_instance(window, &entry)?;
-        Ok(Self { entry, instance })
+        let mut data = AppData::default();
+        let instance = create_instance(window, &entry, &mut data)?;
+        Ok(Self { entry, instance, data })
     }
 
     /// Renders a frame for our Vulkan app
@@ -79,16 +81,26 @@ impl App {
 
     /// Destroys our Vulkan app
     unsafe fn destroy(&mut self) {
+        if VALIDATION_ENABLED {
+            self.instance.destroy_debug_utils_messenger_ext(self.data.messenger, None);
+        }
+
         self.instance.destroy_instance(None);
     }
 }
 
 /// The Vulkan handles and associated properties used by our Vulkan app
 #[derive(Clone, Debug, Default)]
-struct AppData {}
+struct AppData {
+    messenger: vk::DebugUtilsMessengerEXT,
+}
 
 /// Creates Vulkan instance for specified winit window and Vulkan entry point
-unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Error> {
+unsafe fn create_instance(
+    window: &Window, 
+    entry: &Entry,
+    data: &mut AppData
+) -> Result<Instance, Error> {
     // App info with names of the app and engine, app, engine and api versions (technically optional)
     let application_info = vk::ApplicationInfo::builder()
         .application_name(b"Vulkan Tutorial\0")
@@ -122,6 +134,11 @@ unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Er
         .map(|e| e.as_ptr())
         .collect::<Vec<_>>();
 
+    // Add debug utilities extension
+    if VALIDATION_ENABLED {
+        extensions.push(vk::EXT_DEBUG_UTILS_EXTENSION.name.as_ptr());
+    }
+
     // Required by Vulkan SDK on macOS since 1.3.216 as it's not fully support Vulkan specifications
     let flags = if cfg!(target_os = "macos") && entry.version()? >= PORTABILITY_MACOS_VERSION {
         info!("Enabling extensions for macOS portability");
@@ -139,5 +156,44 @@ unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Er
         .enabled_extension_names(&extensions)
         .flags(flags);
 
-    Ok(entry.create_instance(&info, None)?)
+    let instance = entry.create_instance(&info, None)?;
+
+    // Register debug_info as a Vulkan message callback
+    if VALIDATION_ENABLED {
+        let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
+            .message_type(
+                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+            )
+            .user_callback(Some(debug_callback));
+
+        data.messenger = instance.create_debug_utils_messenger_ext(&debug_info, None)?;
+    }
+
+    Ok(instance)
+}
+
+/// Custom Vulkan message callback which simply logs message with level appropriate to its severity
+extern "system" fn debug_callback(
+    severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    type_: vk::DebugUtilsMessageTypeFlagsEXT,
+    data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    _: *mut c_void
+) -> vk::Bool32 {
+    let data = unsafe { *data };
+    let message = unsafe { CStr::from_ptr(data.message) }.to_string_lossy();
+
+    if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::ERROR {
+        error!("({:?}) {}", type_, message);
+    } else if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::WARNING {
+        warn!("({:?}) {}", type_, message);
+    } else if severity >= vk::DebugUtilsMessageSeverityFlagsEXT::INFO {
+        debug!("({:?}) {}", type_, message);
+    } else {
+        trace!("({:?}) {}", type_, message);
+    }
+
+    vk::FALSE
 }
