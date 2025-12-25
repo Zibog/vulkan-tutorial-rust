@@ -7,11 +7,9 @@
 )]
 
 use anyhow::{Error, Ok, Result, anyhow};
-use vulkanalia::{Entry, Instance, Version, loader::{LIBRARY, LibloadingLoader}, vk::{self, HasBuilder, InstanceV1_0}};
+use vulkanalia::{Entry, Instance, loader::{LIBRARY, LibloadingLoader}, vk::{self, HasBuilder, InstanceV1_0}};
 use vulkanalia::window as vk_window;
 use winit::{dpi::LogicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::{Window, WindowAttributes}};
-
-const PORTABILITY_MACOS_VERSION: Version = Version::new(1, 3, 216);
 
 fn main() -> Result<()> {
     pretty_env_logger::init();
