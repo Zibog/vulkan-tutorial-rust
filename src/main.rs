@@ -6,13 +6,20 @@
     clippy::unnecessary_wraps
 )]
 
+use std::collections::HashSet;
+
 use anyhow::{Error, Ok, Result, anyhow};
 use log::info;
-use vulkanalia::{Entry, Instance, Version, loader::{LIBRARY, LibloadingLoader}, vk::{self, HasBuilder, InstanceV1_0}};
+use vulkanalia::{Entry, Instance, Version, loader::{LIBRARY, LibloadingLoader}, vk::{self, EntryV1_0, HasBuilder, InstanceV1_0, layer}};
 use vulkanalia::window as vk_window;
 use winit::{dpi::LogicalSize, event::{Event, WindowEvent}, event_loop::EventLoop, window::{Window, WindowAttributes}};
 
 const PORTABILITY_MACOS_VERSION: Version = Version::new(1, 3, 216);
+
+/// Validation is enabled if the app is being compiled in debug mode
+const VALIDATION_ENABLED: bool = cfg!(debug_assertions);
+/// Useful standard validations are bundled in VK_LAYER_KHRONOS_validation
+const VALIDATION_LAYER: vk::ExtensionName = vk::ExtensionName::from_bytes(b"VK_LAYER_KHRONOS_validation");
 
 fn main() -> Result<()> {
     pretty_env_logger::init();
@@ -80,7 +87,9 @@ impl App {
 #[derive(Clone, Debug, Default)]
 struct AppData {}
 
+/// Creates Vulkan instance for specified winit window and Vulkan entry point
 unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Error> {
+    // App info with names of the app and engine, app, engine and api versions (technically optional)
     let application_info = vk::ApplicationInfo::builder()
         .application_name(b"Vulkan Tutorial\0")
         .application_version(vk::make_version(0, 1, 0))
@@ -88,12 +97,32 @@ unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Er
         .engine_version(vk::make_version(0, 1, 0))
         .api_version(vk::make_version(0, 1, 0));
 
+    // Collect supported app layers into HashSet
+    let available_layers = entry
+        .enumerate_instance_layer_properties()?
+        .iter()
+        .map(|l| l.layer_name)
+        .collect::<HashSet<_>>();
+
+    // Check if validation layer was loaded successfully
+    if VALIDATION_ENABLED && !available_layers.contains(&VALIDATION_LAYER) {
+        return Err(anyhow!("Validation layer requested but not supported"));
+    }
+
+    // Convert collected layers to null-terminated C strings
+    let layers = if VALIDATION_ENABLED {
+        vec![VALIDATION_LAYER.as_ptr()]
+    } else {
+        Vec::new()
+    };
+
+    // Collect instance extensions which we want to use in Vulkan and convert them to null-terminated C strings
     let mut extensions = vk_window::get_required_instance_extensions(window)
         .iter()
         .map(|e| e.as_ptr())
         .collect::<Vec<_>>();
 
-    // Required by Vulkan SDK on macOS since 1.3.216
+    // Required by Vulkan SDK on macOS since 1.3.216 as it's not fully support Vulkan specifications
     let flags = if cfg!(target_os = "macos") && entry.version()? >= PORTABILITY_MACOS_VERSION {
         info!("Enabling extensions for macOS portability");
         extensions.push(vk::KHR_GET_PHYSICAL_DEVICE_PROPERTIES2_EXTENSION.name.as_ptr());
@@ -103,8 +132,10 @@ unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Er
         vk::InstanceCreateFlags::empty()
     };
 
+    // Build our instance info for Vulkan
     let info = vk::InstanceCreateInfo::builder()
         .application_info(&application_info)
+        .enabled_layer_names(&layers)
         .enabled_extension_names(&extensions)
         .flags(flags);
 
