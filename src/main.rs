@@ -150,25 +150,30 @@ unsafe fn create_instance(
     };
 
     // Build our instance info for Vulkan
-    let info = vk::InstanceCreateInfo::builder()
+    let mut info = vk::InstanceCreateInfo::builder()
         .application_info(&application_info)
         .enabled_layer_names(&layers)
         .enabled_extension_names(&extensions)
         .flags(flags);
 
+    let mut debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
+        .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
+        .message_type(
+            vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
+            | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
+            | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
+        )
+        .user_callback(Some(debug_callback));
+
+    // Add debug_info as an extension to vk::InstanceCreateInfo (allows to receive message upon creation of the instance)
+    if VALIDATION_ENABLED {
+        info = info.push_next(&mut debug_info);
+    }
+
     let instance = entry.create_instance(&info, None)?;
 
     // Register debug_info as a Vulkan message callback
     if VALIDATION_ENABLED {
-        let debug_info = vk::DebugUtilsMessengerCreateInfoEXT::builder()
-            .message_severity(vk::DebugUtilsMessageSeverityFlagsEXT::all())
-            .message_type(
-                vk::DebugUtilsMessageTypeFlagsEXT::GENERAL
-                | vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION
-                | vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE
-            )
-            .user_callback(Some(debug_callback));
-
         data.messenger = instance.create_debug_utils_messenger_ext(&debug_info, None)?;
     }
 
