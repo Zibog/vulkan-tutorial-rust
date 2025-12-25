@@ -92,10 +92,10 @@ unsafe fn create_instance(window: &Window, entry: &Entry) -> Result<Instance, Er
     // App info with names of the app and engine, app, engine and api versions (technically optional)
     let application_info = vk::ApplicationInfo::builder()
         .application_name(b"Vulkan Tutorial\0")
-        .application_version(vk::make_version(0, 1, 0))
+        .application_version(vk::make_version(1, 0, 0))
         .engine_name(b"No Engine\0")
-        .engine_version(vk::make_version(0, 1, 0))
-        .api_version(vk::make_version(0, 1, 0));
+        .engine_version(vk::make_version(1, 0, 0))
+        .api_version(vk::make_version(1, 0, 0));
 
     // Collect supported app layers into HashSet
     let available_layers = entry
