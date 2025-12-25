@@ -97,7 +97,19 @@ pub struct SuitabilityError(pub &'static str);
 
 /// Selects first suitable graphic card and write the physical device and related information to the AppData instance
 unsafe fn pick_physical_device(instance: &Instance, data: &mut AppData) -> Result<(), Error> {
-    Ok(())
+    for physical_device in instance.enumerate_physical_devices()? {
+        let properties = instance.get_physical_device_properties(physical_device);
+
+        if let Err(error) = check_physical_device(instance, data, physical_device) {
+            warn!("Skipping physical device (`{}`): {}", properties.device_name, error);
+        } else {
+            info!("Selected physical device (`{}`).", properties.device_name);
+            data.physical_device = physical_device;
+            return Ok(());
+        }
+    }
+    
+    Err(anyhow!("Failed to find suitable physical device."))
 }
 
 /// Check that selected device is suitable for our purposes
@@ -106,17 +118,7 @@ unsafe fn check_physical_device(
     data: &mut AppData,
     physical_device: vk::PhysicalDevice,
 ) -> Result<(), Error> {
-    // Get basic device properties
-    let properties = instance.get_physical_device_properties(physical_device);
-    if properties.device_type != vk::PhysicalDeviceType::DISCRETE_GPU {
-        return Err(anyhow!(SuitabilityError("Only discrete GPUs are supported")));
-    }
-
-    // Get the support for optional features like texture compression, 64 bit floats, and multi-viewport rendering
-    let features = instance.get_physical_device_features(physical_device);
-    if features.geometry_shader != vk::TRUE {
-        return Err(anyhow!(SuitabilityError("Missing geometry shader support")));
-    }
+    QueueFamilyIndices::get(instance, data, physical_device)?;
 
     Ok(())
 }
@@ -234,4 +236,32 @@ extern "system" fn debug_callback(
     }
 
     vk::FALSE
+}
+
+/// Stores the indices of the queue families we need
+#[derive(Copy, Clone, Debug)]
+struct QueueFamilyIndices {
+    graphics: u32,
+}
+
+impl QueueFamilyIndices {
+    unsafe fn get(
+        instance: &Instance,
+        data: &AppData,
+        physical_device: vk::PhysicalDevice,
+    ) -> Result<Self, Error> {
+        let properties = instance.get_physical_device_queue_family_properties(physical_device);
+
+        // Get the first met graphical devices index
+        let graphics = properties
+            .iter()
+            .position(|p| p.queue_flags.contains(vk::QueueFlags::GRAPHICS))
+            .map(|i| i as u32);
+
+        if let Some(graphics) = graphics {
+            Ok(Self { graphics })
+        } else {
+            Err(anyhow!(SuitabilityError("Missing required queue families")))
+        }
+    }
 }
